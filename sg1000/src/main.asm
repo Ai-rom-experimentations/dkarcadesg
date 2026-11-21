@@ -67,6 +67,8 @@ P_LAD_BOT       equ 9
 P_STEP_T        equ 10
 P_JUMP_CNT      equ 11
 P_LAD_FLAGS     equ 12
+P_VX            equ 13          ; committed airborne horizontal velocity (-1, 0, +1)
+P_FALL_START    equ 14          ; takeoff Y in pixels for lethal >=18px fall check
 
 PS_STAND        equ 0
 PS_RUN          equ 1

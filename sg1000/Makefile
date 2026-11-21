@@ -24,7 +24,7 @@ $(ROM): $(SRC_ASM)
 	$(SJASMPLUS) --raw=$(ROM) src/main.asm
 
 test: $(ROM)
-	$(PYTHON) tools/emu.py $(ROM) --frames 180 --screenshot /tmp/sg_test.png
+	$(PYTHON) tools/emu.py $(ROM) --frames 180 --shot /tmp/sg_test.png
 
 clean:
 	rm -f $(ROM) *.lst

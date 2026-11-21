@@ -117,6 +117,95 @@ sa_out:
         XOR A
         RET
 
+; B = col, C = row, A = PF_* flags -> A = 0..3 pixel downward offset (preserves BC, DE, HL, IX)
+SlopeForPlat:
+        CP PF_SLOPE_R
+        JR Z, sfp_r
+        CP PF_SLOPE_L
+        JR Z, sfp_l
+        XOR A
+        RET
+sfp_r:
+        ; Kong's girder (row 7) stays flat on cols 0..17, then bends down-right on 18..29!
+        LD A, C
+        CP 7
+        JR NZ, sfp_r_full
+        LD A, B
+        SUB 18
+        JR NC, sfp_r_k
+        XOR A
+        RET
+sfp_r_k:
+        SRL A
+        SRL A
+        INC A
+        CP 4
+        RET C
+        LD A, 3
+        RET
+sfp_r_full:
+        LD A, B
+        RRCA
+        RRCA
+        RRCA
+        AND 3
+        RET
+sfp_l:
+        LD A, 31
+        SUB B
+        JR NC, sfp_lok
+        XOR A
+sfp_lok:
+        RRCA
+        RRCA
+        RRCA
+        AND 3
+        RET
+
+; B = col, C = row -> A = 0..3 pixel downward slope offset at (B, C) (preserves BC, DE, HL, IX)
+SlopeOffsetAtBC:
+        PUSH IX
+        PUSH DE
+        PUSH BC
+        LD D, B                 ; D = target col
+        LD E, C                 ; E = target row
+        LD A, (LEVELBUF + L_NPLAT)
+        OR A
+        JR Z, soa_zero
+        LD B, A
+        LD IX, LEVELBUF + L_PLAT
+soa_lp:
+        LD A, (IX + 2)
+        CP E
+        JR NZ, soa_nxt
+        LD A, D
+        CP (IX + 0)
+        JR C, soa_nxt
+        CP (IX + 1)
+        JR Z, soa_hit
+        JR NC, soa_nxt
+soa_hit:
+        LD A, (IX + 3)
+        LD B, D
+        LD C, E
+        CALL SlopeForPlat
+        POP BC
+        POP DE
+        POP IX
+        RET
+soa_nxt:
+        INC IX
+        INC IX
+        INC IX
+        INC IX
+        DJNZ soa_lp
+soa_zero:
+        XOR A
+        POP BC
+        POP DE
+        POP IX
+        RET
+
 ; B = col, C = row, A = 0/1 (preserves BC)
 SetSolid:
         PUSH HL
@@ -700,13 +789,17 @@ iu_run:
         INC A
         LD (DK + D_POSE), A
 
-        ; Pauline rides upward on Kong's shoulder
+        ; Pauline rides upward above 24x24 Kong's shoulders (zero scanline overlap!)
         LD A, (DK + D_Y)
-        ADD A, 12
+        SUB 8
         RRCA
         RRCA
         RRCA
         AND $1F
+        CP 4
+        JR NC, iu_pau_ok
+        LD A, 4
+iu_pau_ok:
         LD (LEVELBUF + L_PAUYY), A
 
         ; Tear out ladder rungs 2 rows below Kong (leave girder rows 7,10,13,16,19 intact!)
@@ -756,7 +849,7 @@ iu_chk_top:
 
 iu_stomp:
         CP 5
-        JR NC, iu_laugh
+        JP NC, iu_laugh
         ; 4 heavy hops leftward (phase 1..4), each 18 frames!
         LD A, (GAME + G_STATE_T)
         CP 18
@@ -786,28 +879,71 @@ iu_land_hop:
         LD (GAME + G_STATE_T), A
         CALL SoundSmash
 
-        ; Warp one girder tier per stomp (erasing left/right end cap to show crooked slope!)
+        ; Progressively bend one entire girder tier into sloped T_SLOPE_0..3 per stomp!
         LD A, (GAME + G_PHASE)  ; 1..4 -> rows 19, 16, 13, 10
         LD B, A
         LD A, 22
 iu_sub3:
         SUB 3
         DJNZ iu_sub3
-        LD C, A                 ; target girder row
+        LD C, A                 ; C = target girder row
         LD A, (GAME + G_PHASE)
         BIT 0, A
-        LD B, 30
-        JR NZ, iu_warp_put
-        LD B, 1
-iu_warp_put:
+        JR Z, iu_bend_even
+        ; Odd stomps (1->row 19, 3->row 13): bend cols 0..29 PF_SLOPE_R, clear 30..31
+        LD B, 0
+iu_bo_lp:
+        LD A, PF_SLOPE_R
+        CALL SlopeForPlat
+        ADD A, T_SLOPE_0
+        CALL TilePut
+        INC B
+        LD A, B
+        CP 30
+        JR C, iu_bo_lp
         LD A, T_BLANK
         CALL TilePut
+        INC B
+        LD A, T_BLANK
+        CALL TilePut
+        JR iu_stomp_adv
+iu_bend_even:
+        ; Even stomps (2->row 16, 4->row 10): clear 0..1, bend cols 2..31 PF_SLOPE_L
+        LD B, 0
+        LD A, T_BLANK
+        CALL TilePut
+        INC B
+        LD A, T_BLANK
+        CALL TilePut
+        LD B, 2
+iu_be_lp:
+        LD A, PF_SLOPE_L
+        CALL SlopeForPlat
+        ADD A, T_SLOPE_0
+        CALL TilePut
+        INC B
+        LD A, B
+        CP 32
+        JR C, iu_be_lp
 
+iu_stomp_adv:
         LD A, (GAME + G_PHASE)
         INC A
         LD (GAME + G_PHASE), A
         CP 5
         JP C, BuildSprites
+        ; Final stomp also bends Kong's own top girder (row 7, cols 18..29) + Gorilla Roar!
+        LD C, 7
+        LD B, 18
+iu_b7_lp:
+        LD A, PF_SLOPE_R
+        CALL SlopeForPlat
+        ADD A, T_SLOPE_0
+        CALL TilePut
+        INC B
+        LD A, B
+        CP 30
+        JR C, iu_b7_lp
         CALL SoundRoar
         JP BuildSprites
 
@@ -1313,19 +1449,26 @@ lsb_ir: LD (HL), A
 
         ; Player init
         LD A, (LEVELBUF + L_MARIOX)
+        LD B, A
         ADD A, A
         ADD A, A
         ADD A, A
         LD (PLAYER + P_X), A
         LD A, (LEVELBUF + L_MARIOY)
+        LD C, A
         ADD A, A
         ADD A, A
         ADD A, A
         SUB 16
+        LD D, A
+        CALL SlopeOffsetAtBC
+        ADD A, D
         LD (PLAYER + P_Y), A
+        LD (PLAYER + P_FALL_START), A
         XOR A
         LD (PLAYER + P_YSUB), A
         LD (PLAYER + P_VY), A
+        LD (PLAYER + P_VX), A
         LD (PLAYER + P_STATE), A
         LD (PLAYER + P_ANIM), A
         LD (PLAYER + P_STEP_T), A
@@ -1471,7 +1614,16 @@ bsm_cmid:
         LD A, T_CONVEYOR
         JR bsm_putp
 bsm_gird:
+        LD A, (IX + 3)
+        CP PF_SLOPE_R
+        JR Z, bsm_slope
+        CP PF_SLOPE_L
+        JR Z, bsm_slope
         LD A, T_GIRDER
+        JR bsm_putp
+bsm_slope:
+        CALL SlopeForPlat
+        ADD A, T_SLOPE_0
 bsm_putp:
         CALL TilePut
         LD A, B
@@ -1505,10 +1657,15 @@ bsm_lrow:
         LD A, E
         CP LF_BROKEN
         JR NZ, bsm_lfull
-        ; Broken ladder: draw top rung & bottom stub, leave middle empty!
+        ; Broken ladder: leave top girder intact, draw broken stubs in gap below!
         LD A, C
         CP (IX + 1)
+        JR Z, bsm_ladv
+        LD A, (IX + 1)
+        INC A
+        CP C
         JR Z, bsm_lstub
+        LD A, C
         INC A
         CP D
         JR Z, bsm_lstub
@@ -1636,9 +1793,77 @@ bsm_ilp:
 ; ============================================================================
 DrawHUD:
         CALL DrawTopScoreBar
+        ; Stamp arcade Red "1UP" (cols 1..3) & Red "HIGH" (cols 16..19) on row 0!
+        LD C, 0
+        LD B, 1
+        LD A, T_HUD_1UP0
+        CALL TilePut
+        INC B
+        INC A
+        CALL TilePut
+        INC B
+        INC A
+        CALL TilePut
+        LD B, 16
+        LD A, T_HUD_HI0
+        CALL TilePut
+        INC B
+        INC A
+        CALL TilePut
+        INC B
+        INC A
+        CALL TilePut
+        INC B
+        INC A
+        CALL TilePut
+
         LD HL, VRAM_NAME + NAME_COLS + 1
         LD DE, txt_hud2
         CALL DrawText
+
+        ; Framed Arcade [BONUS] Scoreboard Box at cols 24..29, rows 1..3!
+        LD C, 1
+        LD B, 24
+        LD A, T_BONUS_TL
+        CALL TilePut
+        INC B
+        LD A, T_BONUS_H0
+        CALL TilePut
+        INC B
+        LD A, T_BONUS_H1
+        CALL TilePut
+        INC B
+        LD A, T_BONUS_H2
+        CALL TilePut
+        INC B
+        LD A, T_BONUS_T
+        CALL TilePut
+        INC B
+        LD A, T_BONUS_TR
+        CALL TilePut
+
+        LD C, 2
+        LD B, 24
+        LD A, T_BONUS_L
+        CALL TilePut
+        LD B, 29
+        LD A, T_BONUS_R
+        CALL TilePut
+
+        LD C, 3
+        LD B, 24
+        LD A, T_BONUS_BL
+        CALL TilePut
+        LD D, 4
+dh_b_lp:
+        INC B
+        LD A, T_BONUS_B
+        CALL TilePut
+        DEC D
+        JR NZ, dh_b_lp
+        INC B
+        LD A, T_BONUS_BR
+        CALL TilePut
         JP UpdateHUD
 
 UpdateHUD:
@@ -1678,8 +1903,8 @@ uh_l1:
         LD C, 1
         CALL TilePutChar
 
-        ; 4-digit Bonus timer
-        LD HL, VRAM_NAME + NAME_COLS + 22
+        ; 4-digit Bonus timer inside framed [BONUS] box (row 2, cols 25..28)!
+        LD HL, VRAM_NAME + (2 * NAME_COLS) + 25
         LD DE, GAME + G_BONUS
         LD B, 2
         JP DrawDigits
@@ -2120,13 +2345,17 @@ uoe_step:
         LD A, (IX + EL_DY)
         BIT 7, A
         JR Z, uoe_down
-        ; Moving up: wrap if C < EL_MIN
+        ; Moving up: wrap if C < EL_MIN (riding into top pulley is fatal!)
         LD A, C
         CP (IX + EL_MIN)
         JR NC, uoe_setr
         LD C, (IX + EL_MAX)
-        LD E, 0                 ; Mario drops off if riding into top pulley!
-        JR uoe_setr
+        LD A, E
+        OR A
+        JR Z, uoe_setr
+        LD (IX + EL_ROW), C
+        CALL StampElevatorCar
+        JP KillPlayer
 uoe_down:
         LD A, (IX + EL_MAX)
         CP C
@@ -2148,6 +2377,7 @@ uoe_setr:
         ADD A, A
         SUB 16
         LD (PLAYER + P_Y), A
+        LD (PLAYER + P_FALL_START), A
         XOR A
         LD (PLAYER + P_YSUB), A
         LD (PLAYER + P_VY), A
@@ -2165,7 +2395,16 @@ UpdatePlayer:
         CP PS_CLIMB
         JP Z, pl_climb_update
 
-        ; ---- 1. Horizontal input (1 px/frame) ----
+        ; ---- 1. Horizontal movement (grounded = live input, airborne = committed P_VX!) ----
+        LD A, (PLAYER + P_FLAGS)
+        BIT PF_GROUNDED, A
+        JR NZ, pl_hinp
+        LD A, (PLAYER + P_VX)
+        LD B, A
+        LD C, A
+        JR pl_hmove
+
+pl_hinp:
         LD B, 0
         LD A, (INP_HELD)
         BIT 2, A                ; Left
@@ -2174,14 +2413,16 @@ UpdatePlayer:
         LD A, (PLAYER + P_FLAGS)
         SET PF_LEFT, A
         LD (PLAYER + P_FLAGS), A
-        JR pl_hmove
+        JR pl_hsave_c
 pl_chk_r:
         BIT 3, A                ; Right
-        JR Z, pl_hmove
+        JR Z, pl_hsave_c
         LD B, 1
         LD A, (PLAYER + P_FLAGS)
         RES PF_LEFT, A
         LD (PLAYER + P_FLAGS), A
+pl_hsave_c:
+        LD C, B                 ; C = grounded input VX for jump commitment!
 
 pl_hmove:
         LD A, (PLAYER + P_X)
@@ -2216,7 +2457,9 @@ pl_conv_push:
         LD A, (GAME + G_FRAME)
         AND 1
         JR NZ, pl_chk_jump
+        PUSH BC
         CALL GetConveyorPush
+        POP BC
         OR A
         JR Z, pl_chk_jump
         LD B, A
@@ -2227,7 +2470,7 @@ pl_conv_push:
         LD (PLAYER + P_X), A
 
 pl_chk_jump:
-        ; ---- 3. Jump (disabled while holding Hammer, just like arcade!) ----
+        ; ---- 3. Jump (disabled while holding Hammer; commits P_VX & records P_FALL_START!) ----
         LD A, (GAME + G_HAMMER_TIME)
         OR A
         JR NZ, pl_gravity
@@ -2237,7 +2480,11 @@ pl_chk_jump:
         LD A, (PLAYER + P_FLAGS)
         BIT PF_GROUNDED, A
         JR Z, pl_gravity
-        LD A, -17               ; -17 eighths -> 17.5 px peak, 34-frame arc!
+        LD A, C
+        LD (PLAYER + P_VX), A
+        LD A, (PLAYER + P_Y)
+        LD (PLAYER + P_FALL_START), A
+        LD A, -17               ; -17 eighths -> 19 px peak, 34-frame arc!
         LD (PLAYER + P_VY), A
         XOR A
         LD (PLAYER + P_YSUB), A
@@ -2292,10 +2539,10 @@ pl_ypos_ok:
         LD A, L
         LD (PLAYER + P_Y), A
 
-        ; ---- 5. Ground landing (only when P_VY >= 0; checks center + toe/heel!) ----
+        ; ---- 5. Ground landing + sub-pixel sloped girder snap (checks center + toe/heel!) ----
         LD A, (PLAYER + P_VY)
         BIT 7, A
-        JR NZ, pl_airborne
+        JP NZ, pl_airborne
 
         LD A, (PLAYER + P_Y)
         ADD A, 16
@@ -2305,6 +2552,8 @@ pl_ypos_ok:
         SRL A
         LD C, A                 ; feet tile row
 
+        ; Also check (C - 1) if walking downhill onto a +3->+0 transition? Wait: C = (P_Y+16)>>3;
+        ; when walking uphill (+1->+0) E = C*8+1 (still row C!), and downhill (+0->+1) E = C*8 (still row C!).
         LD A, (PLAYER + P_X)
         ADD A, 8
         SRL A
@@ -2336,33 +2585,65 @@ pl_ypos_ok:
         JR Z, pl_airborne
 
 pl_chk_snap:
-        ; Snap only if feet are within top 6 pixels of this solid row!
+        ; Compute exact sloped surface pixel Y: D = C*8 + SlopeOffsetAtBC(B, C)
+        CALL SlopeOffsetAtBC
+        LD D, A
         LD A, C
         ADD A, A
         ADD A, A
         ADD A, A
-        LD D, A                 ; row * 8
+        ADD A, D
+        LD D, A                 ; D = sloped surface Y
+        ; Snap if feet E are within [-2 .. +6] pixels of sloped surface D!
         LD A, E
+        ADD A, 2
         SUB D
-        CP 7
+        CP 9
         JR NC, pl_airborne
 
-        ; Landed!
+        ; Landed! Compute snapped P_Y = D - 16
         LD A, D
         SUB 16
+        LD D, A                 ; D = landed P_Y
+        ; Check lethal >= 18px fall distance if transitioning from airborne!
+        LD A, (PLAYER + P_FLAGS)
+        BIT PF_GROUNDED, A
+        JR NZ, pl_snap_safe
+        LD A, (PLAYER + P_FALL_START)
+        LD B, A
+        LD A, D
+        SUB B
+        JR C, pl_snap_safe
+        CP 18
+        JR C, pl_snap_safe
+        LD A, D
         LD (PLAYER + P_Y), A
+        JP KillPlayer
+
+pl_snap_safe:
+        LD A, D
+        LD (PLAYER + P_Y), A
+        LD (PLAYER + P_FALL_START), A
         XOR A
         LD (PLAYER + P_YSUB), A
         LD (PLAYER + P_VY), A
+        LD (PLAYER + P_VX), A
         LD A, (PLAYER + P_FLAGS)
         SET PF_GROUNDED, A
         LD (PLAYER + P_FLAGS), A
         JR pl_chk_ladder
 
 pl_airborne:
+        ; If stepping off a girder edge without jumping, drop straight down (P_VX=0) & record takeoff Y!
         LD A, (PLAYER + P_FLAGS)
+        BIT PF_GROUNDED, A
+        JR Z, pl_chk_ladder
         RES PF_GROUNDED, A
         LD (PLAYER + P_FLAGS), A
+        XOR A
+        LD (PLAYER + P_VX), A
+        LD A, (PLAYER + P_Y)
+        LD (PLAYER + P_FALL_START), A
 
 pl_chk_ladder:
         ; ---- 6. Ladder Grab (only when not holding Hammer!) ----
@@ -2468,13 +2749,13 @@ tgl_top_ok:
         LD A, (INP_HELD)
         BIT 0, A                ; Up pressed?
         JR Z, tgl_down
-        ; For Up: D < P_Y <= E + 2
+        ; For Up: D + slope_top < P_Y <= E + 4
         LD A, (PLAYER + P_Y)
         CP D
         JR Z, tgl_next
         JR C, tgl_next
         LD A, E
-        ADD A, 2
+        ADD A, 4
         LD B, A
         LD A, (PLAYER + P_Y)
         CP B
@@ -2508,7 +2789,10 @@ tgl_grab:
         LD (PLAYER + P_LAD_BOT), A
         LD A, (IX + 3)
         LD (PLAYER + P_LAD_FLAGS), A
+        LD A, (PLAYER + P_Y)
+        LD (PLAYER + P_FALL_START), A
         XOR A
+        LD (PLAYER + P_VX), A
         LD (PLAYER + P_VY), A
         LD (PLAYER + P_YSUB), A
         LD A, PS_CLIMB
@@ -2572,12 +2856,19 @@ pcu_anim:
         CALL Z, SoundClimb
 
 pcu_bounds:
-        ; Reached top girder? (P_Y <= rtop*8 - 16)
+        ; Reached top girder? (P_Y <= rtop*8 - 16 + slope)
+        LD A, (PLAYER + P_LAD_COL)
+        LD B, A
         LD A, (PLAYER + P_LAD_TOP)
+        LD C, A
+        CALL SlopeOffsetAtBC
+        LD D, A
+        LD A, C
         ADD A, A
         ADD A, A
         ADD A, A
         SUB 16
+        ADD A, D
         LD B, A
         LD A, (PLAYER + P_Y)
         CP B
@@ -2589,12 +2880,19 @@ pcu_exit_top:
         JR pcu_dismount
 
 pcu_chk_bot:
-        ; Reached bottom girder? (P_Y >= rbot*8 - 16)
+        ; Reached bottom girder? (P_Y >= rbot*8 - 16 + slope)
+        LD A, (PLAYER + P_LAD_COL)
+        LD B, A
         LD A, (PLAYER + P_LAD_BOT)
+        LD C, A
+        CALL SlopeOffsetAtBC
+        LD D, A
+        LD A, C
         ADD A, A
         ADD A, A
         ADD A, A
         SUB 16
+        ADD A, D
         LD B, A
         LD A, (PLAYER + P_Y)
         CP B
@@ -2602,7 +2900,10 @@ pcu_chk_bot:
         LD A, B
         LD (PLAYER + P_Y), A
 pcu_dismount:
+        LD A, (PLAYER + P_Y)
+        LD (PLAYER + P_FALL_START), A
         XOR A
+        LD (PLAYER + P_VX), A
         LD (PLAYER + P_VY), A
         LD (PLAYER + P_YSUB), A
         LD A, (PLAYER + P_FLAGS)
@@ -2792,6 +3093,33 @@ aes_ok:
 SpawnStageBarrel:
         CALL AllocEnemySlot
         RET Z
+        ; Iconic 1981 arcade opening throw: 1st barrel drops vertically onto Oil Drum!
+        LD A, (GAME + G_OIL_LIT)
+        OR A
+        JR NZ, ssb_roll
+        LD A, (DK + D_FRAME)
+        CP 1
+        JR NZ, ssb_roll
+        LD A, (LEVELBUF + L_OILX)
+        CP $FF
+        JR Z, ssb_roll
+        ADD A, A
+        ADD A, A
+        ADD A, A
+        ADD A, 4
+        LD (IX + E_X), A
+        LD A, (DK + D_Y)
+        ADD A, 8
+        LD (IX + E_Y), A
+        LD (IX + E_STATE), 4    ; E_STATE=4: Wild vertical barrel!
+        LD (IX + E_TYPE), ET_BLUE
+        LD (IX + E_VX), 0
+        LD (IX + E_VY), 3
+        LD (IX + E_ANIM), 0
+        LD (IX + E_DATA), 0
+        JP SoundThrow
+
+ssb_roll:
         LD A, 1
         LD (IX + E_STATE), A
         ; Every 4th barrel is a Blue Barrel!
@@ -2803,7 +3131,7 @@ SpawnStageBarrel:
 ssb_type:
         LD (IX + E_TYPE), B
         LD A, (DK + D_X)
-        ADD A, 12
+        ADD A, 16
         LD (IX + E_X), A
         LD A, (DK + D_Y)
         ADD A, 8
@@ -2970,6 +3298,8 @@ UpdateOneEnemy:
         JP Z, EnemyPie
         ; Otherwise ET_BARREL or ET_BLUE
         LD A, (IX + E_STATE)
+        CP 4
+        JP Z, BarrelWild
         CP 2
         JP Z, BarrelFalling
         CP 3
@@ -2994,10 +3324,35 @@ UpdateOneEnemy:
         CALL CheckBarrelLadderDE
         OR A
         JR Z, brl_roll
-        ; E_DATA holds target pixel Y; take ladder with ~35% probability (75% for Blue!)
+        ; Mario-position-aware ladder shortcut AI (dkong.asm):
+        ; Check if Mario is below barrel and within horizontal pursuit range!
+        LD A, (PLAYER + P_Y)
+        ADD A, 8
+        CP (IX + E_Y)
+        JR C, brl_lad_rng       ; Mario is above barrel -> only rare random drop
+        LD A, (PLAYER + P_X)
+        ADD A, 4
+        SUB (IX + E_X)
+        CALL Abs
+        CP 56
+        JR NC, brl_lad_rng
+        ; Mario is below & near this ladder! Blue Barrel ALWAYS hunts him; Brown 50%!
         LD A, (IX + E_TYPE)
         CP ET_BLUE
         JR Z, brl_take_lad
+        LD A, (GAME + G_RNG)
+        AND 1
+        JR Z, brl_take_lad
+        JR brl_roll
+brl_lad_rng:
+        LD A, (IX + E_TYPE)
+        CP ET_BLUE
+        JR NZ, brl_lad_r4
+        LD A, (GAME + G_RNG)
+        AND 1
+        JR Z, brl_take_lad
+        JR brl_roll
+brl_lad_r4:
         LD A, (GAME + G_RNG)
         AND 3
         JR NZ, brl_roll
@@ -3092,13 +3447,78 @@ brl_chk_floor:
         LD C, A
         CALL SolidAt
         OR A
-        RET NZ
+        JR Z, brl_gap
+        ; Follow sub-pixel sloped girder surface (0..+3 px)!
+        CALL SlopeOffsetAtBC
+        LD D, A
+        LD A, C
+        ADD A, A
+        ADD A, A
+        ADD A, A
+        SUB 8
+        ADD A, D
+        LD (IX + E_Y), A
+        RET
+brl_gap:
         ; Reached gap at end of girder -> start falling & flip VX for next tier!
         LD (IX + E_STATE), 2
         LD (IX + E_VY), 1
         LD A, (IX + E_VX)
         NEG
         LD (IX + E_VX), A
+        RET
+
+; Wild vertical Blue Barrel (Kong's iconic 1st throw on 25m -> ignites Oil Drum!)
+BarrelWild:
+        LD A, (IX + E_Y)
+        ADD A, (IX + E_VY)
+        LD (IX + E_Y), A
+        ; Subtle 1px horizontal bounce wiggle as it crashes through girders
+        LD A, (IX + E_ANIM)
+        AND 3
+        JR NZ, bw_chk_oil
+        LD A, (IX + E_ANIM)
+        BIT 2, A
+        LD A, (IX + E_X)
+        JR Z, bw_wl
+        INC A
+        JR bw_wx
+bw_wl:
+        DEC A
+bw_wx:
+        LD (IX + E_X), A
+bw_chk_oil:
+        LD A, (LEVELBUF + L_OILY)
+        ADD A, 2
+        ADD A, A
+        ADD A, A
+        ADD A, A
+        SUB 8
+        CP (IX + E_Y)
+        RET NC
+        ; Ignited the Oil Drum -> birth first Fireball!
+        LD A, 1
+        LD (GAME + G_OIL_LIT), A
+        LD A, (GAME + G_FIRE_CNT)
+        LD B, A
+        LD A, (LEVELBUF + L_MAX_FIRES)
+        CP B
+        JR Z, bw_done
+        JR C, bw_done
+        LD B, (IX + E_X)
+        LD A, (LEVELBUF + L_OILY)
+        ADD A, 2
+        ADD A, A
+        ADD A, A
+        ADD A, A
+        SUB 8
+        LD C, A
+        PUSH IX
+        CALL SpawnFireAtBC
+        POP IX
+        CALL SoundSpringDrop
+bw_done:
+        LD (IX + E_STATE), 0
         RET
 
 BarrelFalling:
@@ -3133,11 +3553,14 @@ bf_land_chk:
         CALL SolidAt
         OR A
         RET Z
+        CALL SlopeOffsetAtBC
+        LD D, A
         LD A, C
         ADD A, A
         ADD A, A
         ADD A, A
         SUB 8
+        ADD A, D
         LD (IX + E_Y), A
         LD (IX + E_VY), 0
         LD (IX + E_STATE), 1
@@ -3157,7 +3580,7 @@ BarrelDownLadder:
         LD (IX + E_STATE), 1
         RET
 
-; D = col, E = rtop -> returns A=1 and sets (IX+E_DATA) = rbot*8 - 8 if ladder matches
+; D = col, E = rtop -> returns A=1 and sets (IX+E_DATA) = rbot*8 - 8 + slope if ladder matches
 CheckBarrelLadderDE:
         LD A, (LEVELBUF + L_NLADDER)
         OR A
@@ -3178,11 +3601,15 @@ cbl_lp:
         LD A, (HL)              ; flags
         CP LF_DECOR
         JR Z, cbl_skip1
+        LD B, D                 ; B = col, C = rbot
+        CALL SlopeOffsetAtBC
+        LD D, A
         LD A, C
         ADD A, A
         ADD A, A
         ADD A, A
         SUB 8
+        ADD A, D
         LD (IX + E_DATA), A
         LD A, 1
         RET
@@ -3196,17 +3623,63 @@ cbl_skip1:
         XOR A
         RET
 
-; ---- Patrolling & Ladder-Climbing Fireball ----
+; ---- Patrolling, Mario-Pursuing & Ladder-Climbing Fireball ----
 EnemyFire:
         LD A, (IX + E_STATE)
         CP 3
-        JR Z, ef_climb
+        JP Z, ef_climb
 
         ; Move every 2nd frame
         LD A, (GAME + G_FRAME)
         AND 1
         RET NZ
 
+        ; Every 32 anim ticks, bias horizontal VX toward Mario (dkong.asm Beam/Firefox AI)!
+        LD A, (IX + E_ANIM)
+        AND 31
+        JR NZ, ef_chk_conv
+        LD A, (GAME + G_RNG)
+        AND 1
+        JR Z, ef_chk_conv
+        LD A, (PLAYER + P_X)
+        ADD A, 4
+        CP (IX + E_X)
+        LD B, 1
+        JR NC, ef_set_vx
+        LD B, -1
+ef_set_vx:
+        LD (IX + E_VX), B
+
+ef_chk_conv:
+        ; Conveyor belt drift on 50m Pie Factory (every 4th frame; preserve IX!)
+        LD A, (GAME + G_FRAME)
+        AND 3
+        JR NZ, ef_chk_lad
+        LD A, (IX + E_X)
+        ADD A, 4
+        SRL A
+        SRL A
+        SRL A
+        LD D, A
+        LD A, (IX + E_Y)
+        ADD A, 8
+        SRL A
+        SRL A
+        SRL A
+        LD E, A
+        PUSH IX
+        CALL ConveyorDirAtDE
+        POP IX
+        OR A
+        JR Z, ef_chk_lad
+        ADD A, (IX + E_X)
+        CP 6
+        JR C, ef_chk_lad
+        CP 242
+        JR NC, ef_chk_lad
+        LD (IX + E_X), A
+
+ef_chk_lad:
         ; Check if aligned with a normal ladder to chase Mario vertically!
         LD A, (IX + E_X)
         AND 7
@@ -3243,6 +3716,15 @@ ef_walk:
         OR A
         JR Z, ef_flip
         LD (IX + E_X), D
+        CALL SlopeOffsetAtBC
+        LD D, A
+        LD A, C
+        ADD A, A
+        ADD A, A
+        ADD A, A
+        SUB 8
+        ADD A, D
+        LD (IX + E_Y), A
         RET
 ef_flip:
         LD A, (IX + E_VX)
@@ -3259,6 +3741,21 @@ ef_climb:
         LD (IX + E_Y), A
         CP (IX + E_DATA)
         RET NZ
+        ; Reached destination girder -> snap onto sloped surface!
+        LD A, (IX + E_X)
+        SRL A
+        SRL A
+        SRL A
+        LD B, A
+        LD A, (IX + E_Y)
+        ADD A, 8
+        SRL A
+        SRL A
+        SRL A
+        LD C, A
+        CALL SlopeOffsetAtBC
+        ADD A, (IX + E_DATA)
+        LD (IX + E_Y), A
         LD (IX + E_VY), 0
         LD (IX + E_STATE), 1
         RET
@@ -3300,6 +3797,12 @@ ftl_lp:
         LD A, (PLAYER + P_Y)
         CP (IX + E_Y)
         JR NC, ftl_s1
+        LD A, E
+        ADD A, A
+        ADD A, A
+        ADD A, A
+        SUB 8
+        LD (IX + E_Y), A
         LD A, C
         ADD A, A
         ADD A, A
@@ -3325,6 +3828,12 @@ ftl_chk_top:
         ADD A, A
         SUB 8
         LD (IX + E_DATA), A
+        LD A, E
+        ADD A, A
+        ADD A, A
+        ADD A, A
+        SUB 8
+        LD (IX + E_Y), A
         LD (IX + E_VY), 1
         LD (IX + E_STATE), 3
         RET
@@ -3469,29 +3978,70 @@ urv_lp:
         PUSH HL
         LD A, (HL)
         OR A
-        JR NZ, urv_nxt
+        JP NZ, urv_nxt
 
-        ; Check if Mario's center X is over rivet column and feet near rivet row
+        ; Check if Mario's center X is over rivet column
         LD A, (PLAYER + P_X)
         ADD A, 8
+        LD E, A                 ; E = center X in pixels
         SRL A
         SRL A
         SRL A
         CP (IX + 0)
-        JR NZ, urv_nxt
+        JP NZ, urv_nxt
 
+        ; If grounded (walking across rivet, e.g. with Hammer!), pull only once leading foot
+        ; is already on the next solid column (E & 7 == 7 facing R, or E & 7 == 0 facing L)!
+        LD A, (PLAYER + P_FLAGS)
+        BIT PF_GROUNDED, A
+        JR Z, urv_air_y
+        BIT PF_LEFT, A
+        LD A, E
+        AND 7
+        JR NZ, urv_chk_r_edge
+        ; E & 7 == 0: pull if facing left!
+        LD A, (PLAYER + P_FLAGS)
+        BIT PF_LEFT, A
+        JP Z, urv_nxt
+        JR urv_gnd_y
+urv_chk_r_edge:
+        CP 7
+        JP NZ, urv_nxt
+        LD A, (PLAYER + P_FLAGS)
+        BIT PF_LEFT, A
+        JP NZ, urv_nxt
+
+urv_gnd_y:
         LD A, (IX + 1)
         ADD A, A
         ADD A, A
         ADD A, A
-        LD C, A                 ; rivet surface Y
+        LD C, A
         LD A, (PLAYER + P_Y)
         ADD A, 16
         SUB C
         CALL Abs
-        CP 10
+        CP 6
+        JR NC, urv_nxt
+        JR urv_pull
+
+urv_air_y:
+        ; Airborne jump over rivet: feet within 24 px above rivet surface!
+        LD A, (IX + 1)
+        ADD A, A
+        ADD A, A
+        ADD A, A
+        LD C, A
+        LD A, (PLAYER + P_Y)
+        ADD A, 16
+        LD D, A
+        LD A, C
+        SUB D
+        JR C, urv_nxt
+        CP 24
         JR NC, urv_nxt
 
+urv_pull:
         ; Pull rivet! Create jumpable gap & score +100!
         POP HL
         LD (HL), 1
@@ -3540,7 +4090,8 @@ urv_nxt:
         LD DE, 2
         ADD IX, DE
         POP BC
-        DJNZ urv_lp
+        DEC B
+        JP NZ, urv_lp
         RET
 
 UpdateItems:
@@ -3667,7 +4218,7 @@ Collide:
         CP PS_WIN
         RET Z
 
-        ; 1. Touching Donkey Kong -> fatal!
+        ; 1. Touching 24x24 Donkey Kong -> fatal!
         LD A, (DK + D_X)
         ADD A, 8
         LD B, A
@@ -3675,16 +4226,16 @@ Collide:
         ADD A, 8
         SUB B
         CALL Abs
-        CP 13
+        CP 16
         JR NC, col_hammer_box
         LD A, (DK + D_Y)
-        ADD A, 8
+        ADD A, 4
         LD B, A
         LD A, (PLAYER + P_Y)
         ADD A, 8
         SUB B
         CALL Abs
-        CP 13
+        CP 16
         JR NC, col_hammer_box
         JP KillPlayer
 
@@ -3933,14 +4484,32 @@ TriggerStageClear:
         JP Z, TitleScreen
         LD A, PS_WIN
         LD (PLAYER + P_STATE), A
+        ; Stand Mario on Pauline's platform right across from Pauline, facing left!
+        LD A, (LEVELBUF + L_PAUXX)
+        ADD A, 3
+        ADD A, A
+        ADD A, A
+        ADD A, A
+        SUB 2
+        LD (PLAYER + P_X), A
+        LD A, (LEVELBUF + L_PAUYY)
+        ADD A, A
+        ADD A, A
+        ADD A, A
+        SUB 16
+        LD (PLAYER + P_Y), A
+        LD A, (PLAYER + P_FLAGS)
+        SET PF_LEFT, A
+        LD (PLAYER + P_FLAGS), A
         XOR A
         LD (GAME + G_HAMMER_TIME), A
         LD (GAME + G_PHASE), A
-        LD A, 55
+        LD (DK + D_POSE), A
+        LD A, 80
         LD (GAME + G_STATE_T), A
         LD A, GS_LEVELEND
         LD (GAME + G_STATE), A
-        ; Clear active enemies for clean Heart celebration!
+        ; Clear active enemies for clean Heart -> Broken Heart -> Kong Escape cutscene!
         LD HL, ENEMIES
         LD B, 96
         XOR A
@@ -3999,7 +4568,31 @@ LevelEndUpdate:
         CP 1
         JR Z, leu_bonus_tally
 
-        ; Phase 0: Heart celebration pause before bonus tally
+        ; Phase 0 (80..46 = Heart celebration; 45 = Kong Roar & Heart breaks; 44..1 = Kong climbs off with Pauline!)
+        LD A, (GAME + G_STATE_T)
+        CP 45
+        JR NZ, leu_chk_climb
+        CALL SoundRoar
+        LD A, 76
+        LD (DK + D_X), A
+        LD A, 11
+        LD (LEVELBUF + L_PAUXX), A
+leu_chk_climb:
+        LD A, (GAME + G_STATE_T)
+        CP 45
+        JR NC, leu_p0_draw
+        ; Climb Kong upward off the top of the screen!
+        LD A, (DK + D_Y)
+        CP 238
+        JR Z, leu_p0_draw
+        SUB 2
+        LD (DK + D_Y), A
+        RRCA
+        RRCA
+        AND 1
+        INC A
+        LD (DK + D_POSE), A
+leu_p0_draw:
         CALL BuildSprites
         LD A, (GAME + G_STATE_T)
         DEC A
@@ -4302,9 +4895,15 @@ Emit1:
         LD A, C
         OR A
         RET Z
-        DEC C
         LD A, (SCRATCH + 11)
+        CP 192                  ; clip off-screen Y (>= 192 or wrapped negative < 0) cleanly!
+        RET NC
+        DEC C
         DEC A
+        CP $D0                  ; never write TMS9918A $D0 sprite-list terminator by accident!
+        JR NZ, em1_yok
+        LD A, $CF
+em1_yok:
         LD (HL), A
         INC HL
         LD A, (SCRATCH + 10)
@@ -4316,6 +4915,58 @@ Emit1:
         LD A, (SCRATCH + 13)
         LD (HL), A
         INC HL
+        RET
+
+; Emit 24x24 (3x3 8x8) Donkey Kong boss at (SCRATCH+10=x0, SCRATCH+11=y0, SCRATCH+12=pat0, B=pose)
+EmitDK24:
+        LD A, (SCRATCH + 10)
+        LD (SCRATCH + 20), A    ; base X
+        LD A, (SCRATCH + 11)
+        LD (SCRATCH + 21), A    ; cur row Y
+        XOR A
+        LD (SCRATCH + 22), A    ; tile index 0..8
+        LD D, 3                 ; 3 rows
+edk_row:
+        LD A, (SCRATCH + 20)
+        LD (SCRATCH + 10), A
+        LD E, 3                 ; 3 cols
+edk_col:
+        LD A, 6                 ; rich dark-red/chestnut fur
+        ; On pose 3 (hold barrel), tile 7 (bottom-center) is Kong's golden-amber barrel!
+        LD A, B
+        CP 3
+        JR NZ, edk_fur
+        LD A, (SCRATCH + 22)
+        CP 7
+        JR NZ, edk_fur
+        LD A, 10                ; golden-amber barrel!
+        JR edk_put
+edk_fur:
+        LD A, 6
+edk_put:
+        LD (SCRATCH + 13), A
+        PUSH BC
+        PUSH DE
+        CALL Emit1
+        POP DE
+        POP BC
+        LD A, (SCRATCH + 10)
+        ADD A, 8
+        LD (SCRATCH + 10), A
+        LD A, (SCRATCH + 12)
+        INC A
+        LD (SCRATCH + 12), A
+        LD A, (SCRATCH + 22)
+        INC A
+        LD (SCRATCH + 22), A
+        DEC E
+        JR NZ, edk_col
+        LD A, (SCRATCH + 21)
+        ADD A, 8
+        LD (SCRATCH + 21), A
+        LD (SCRATCH + 11), A
+        DEC D
+        JR NZ, edk_row
         RET
 
 EmitBig:
@@ -4437,6 +5088,19 @@ BuildSprites:
         JR Z, bs_m_base
         CP PS_CLIMB
         JR Z, bs_m_base
+        CP PS_WIN
+        JR NZ, bs_m_face_ok
+        ; Only omit Mario's 1-sprite face while Pauline is still on the same scanline (80..46)!
+        LD A, (GAME + G_LEVELTYPE)
+        CP LT_RIVETS
+        JR Z, bs_m_face_ok
+        LD A, (GAME + G_PHASE)
+        OR A
+        JR NZ, bs_m_face_ok
+        LD A, (GAME + G_STATE_T)
+        CP 46
+        JR NC, bs_m_base
+bs_m_face_ok:
         ; Emit 8x8 tan face overlay first so skin sits cleanly on front of head!
         LD A, (PLAYER + P_FLAGS)
         BIT PF_LEFT, A
@@ -4516,28 +5180,30 @@ bs_ham_emit:
         CALL Emit1
 
 bs_popup:
-        ; 3. Floating Score Popup ("100"/"300"/"500"/"800"/"1UP") or Stage-Clear Heart!
+        ; 3. Floating Score Popup ("100"/"300"/"500"/"800"/"1UP") or Stage-Clear Heart / Broken Heart!
         LD A, (GAME + G_STATE)
         CP GS_LEVELEND
         JR NZ, bs_pop_norm
         LD A, (GAME + G_LEVELTYPE)
         CP LT_RIVETS
         JR Z, bs_dk
-        LD A, (LEVELBUF + L_PAUXX)
-        ADD A, A
-        ADD A, A
-        ADD A, A
-        ADD A, 16
+        LD A, 14 * 8 + 4
         LD (SCRATCH + 10), A
-        LD A, (LEVELBUF + L_PAUYY)
-        ADD A, A
-        ADD A, A
-        ADD A, A
-        SUB 14
-        LD (SCRATCH + 11), A
-        LD A, SPR_HEART
-        LD (SCRATCH + 12), A
         LD A, 8
+        LD (SCRATCH + 11), A
+        ; Heart glows pink (80..46), then shatters into Broken Heart when Kong roars & flees!
+        LD A, (GAME + G_PHASE)
+        OR A
+        JR NZ, bs_bheart
+        LD A, (GAME + G_STATE_T)
+        CP 46
+        LD A, SPR_HEART
+        JR NC, bs_hput
+bs_bheart:
+        LD A, SPR_BHEART
+bs_hput:
+        LD (SCRATCH + 12), A
+        LD A, 9
         LD (SCRATCH + 13), A
         CALL Emit1
         JR bs_dk
@@ -4557,7 +5223,10 @@ bs_pop_norm:
         CALL Emit1
 
 bs_dk:
-        ; 4. Donkey Kong (layered tan face overlay + 4 chestnut fur quads!)
+        ; 4. Flicker-free 24x24 Multi-Color Donkey Kong Boss at (D_X - 4, D_Y - 8)!
+        ;    Top row (D_Y-8): 1 tan face + 3 fur = 4 sprites/line
+        ;    Mid row (D_Y  ): 1 tan pecs + 3 fur = 4 sprites/line
+        ;    Bot row (D_Y+8): 3 fur/barrel = 3 sprites/line (leaves slot for barrel/spring!)
         LD A, (DK + D_X)
         ADD A, 4
         LD (SCRATCH + 10), A
@@ -4565,38 +5234,67 @@ bs_dk:
         CP 5
         JR Z, bs_dk_ffall
         LD A, (DK + D_Y)
-        ADD A, 1
+        SUB 8
         LD (SCRATCH + 11), A
         LD A, SPR_DK_FACE
-        JR bs_dk_femit
-bs_dk_ffall:
-        LD A, (DK + D_Y)
-        ADD A, 7
-        LD (SCRATCH + 11), A
-        LD A, SPR_DK_FACE_FALL
-bs_dk_femit:
         LD (SCRATCH + 12), A
-        LD A, 11                ; tan face & grin
+        LD A, 11
         LD (SCRATCH + 13), A
         CALL Emit1
-
-        LD A, (DK + D_POSE)
-        RLCA
-        RLCA
-        ADD A, SPR_DK_STAND_0
+        JR bs_dk_chest
+bs_dk_ffall:
+        LD A, (DK + D_Y)
+        ADD A, 8
+        LD (SCRATCH + 11), A
+        LD A, SPR_DK_FACE_FALL
         LD (SCRATCH + 12), A
+        LD A, 11
+        LD (SCRATCH + 13), A
+        CALL Emit1
+bs_dk_chest:
         LD A, (DK + D_X)
+        ADD A, 4
         LD (SCRATCH + 10), A
         LD A, (DK + D_Y)
         LD (SCRATCH + 11), A
-        LD A, 6                 ; uniform rich dark-red/brown fur (zero half-split!)
+        LD A, SPR_DK_CHEST
+        LD (SCRATCH + 12), A
+        LD A, 11
         LD (SCRATCH + 13), A
-        LD (SCRATCH + 14), A
-        LD (SCRATCH + 15), A
-        LD (SCRATCH + 16), A
-        CALL EmitBig
+        CALL Emit1
 
-        ; 5. Pauline (16x16 = 4 sprites + flashing "HELP!" callout!)
+        ; Compute pose * 9 + SPR_DK_STAND_0
+        LD A, (DK + D_POSE)
+        LD B, A                 ; B = pose (for held amber barrel check in EmitDK24)
+        ADD A, A
+        ADD A, A
+        ADD A, A                ; pose * 8
+        ADD A, B                ; pose * 9
+        ADD A, SPR_DK_STAND_0
+        LD (SCRATCH + 12), A
+        LD A, (DK + D_X)
+        SUB 4
+        LD (SCRATCH + 10), A
+        LD A, (DK + D_Y)
+        SUB 8
+        LD (SCRATCH + 11), A
+        CALL EmitDK24
+
+        ; 5. Pauline (16x16 = 4 sprites + arcade 50% duty-cycle "HELP!" callout!)
+        ;    Hide Pauline once Kong snatches her away during non-rivet Stage Clear!
+        LD A, (GAME + G_STATE)
+        CP GS_LEVELEND
+        JR NZ, bs_pau_vis
+        LD A, (GAME + G_LEVELTYPE)
+        CP LT_RIVETS
+        JR Z, bs_pau_vis
+        LD A, (GAME + G_PHASE)
+        OR A
+        JP NZ, bs_enemies
+        LD A, (GAME + G_STATE_T)
+        CP 46
+        JP C, bs_enemies
+bs_pau_vis:
         LD A, (GAME + G_FRAME)
         BIT 4, A
         LD A, SPR_PAULINE_1_0
@@ -4623,12 +5321,15 @@ bs_pau_set:
         LD (SCRATCH + 16), A
         CALL EmitBig
 
-        ; "HELP!" speech bubble every 64 frames during play
+        ; "HELP!" speech bubble (50% duty cycle during play & demo!)
         LD A, (GAME + G_STATE)
         CP GS_PLAY
+        JR Z, bs_help_chk
+        CP GS_DEMO
         JR NZ, bs_enemies
+bs_help_chk:
         LD A, (GAME + G_FRAME)
-        AND $30
+        BIT 5, A
         JR NZ, bs_enemies
         LD A, (LEVELBUF + L_PAUXX)
         ADD A, 2
@@ -4693,10 +5394,10 @@ bse_loop:
         CP ET_PIE
         JR Z, bse_pie
 
-        ; Brown or Blue Barrel (rolling vs down-ladder!)
+        ; Brown or Blue Barrel (rolling vs down-ladder / wild vertical!)
         LD A, (IX + E_STATE)
         CP 3
-        JR Z, bse_bdown
+        JR NC, bse_bdown
         LD A, (IX + E_ANIM)
         RRCA
         RRCA
@@ -4719,6 +5420,17 @@ bse_bcol:
         JR bse_emit
 
 bse_fire:
+        ; Hopping flame bounce (-1 px on alternate anim steps when walking!)
+        LD A, (IX + E_STATE)
+        CP 3
+        JR Z, bse_fnohop
+        LD A, (IX + E_ANIM)
+        BIT 2, A
+        JR Z, bse_fnohop
+        LD A, (SCRATCH + 11)
+        DEC A
+        LD (SCRATCH + 11), A
+bse_fnohop:
         LD A, (IX + E_VX)
         BIT 7, A
         LD B, SPR_FIRE_R1
@@ -4789,7 +5501,7 @@ bs_dma:
 ;  Strings
 ; ============================================================================
 txt_hud1:       DB "1UP 000000     HIGH 000000", $FF
-txt_hud2:       DB "     L=01      BONUS 0000", $FF
+txt_hud2:       DB "     L=01", $FF
 txt_mode0:      DB "1P ARCADE 4-STAGE", $FF
 txt_mode1:      DB "1P US TOURNAMENT", $FF
 txt_mode2:      DB "1P REMIX 8-TOUR", $FF

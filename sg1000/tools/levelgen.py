@@ -36,6 +36,8 @@ LT_RIVETS    = 3
 PF_NORMAL    = 0
 PF_CONV_R    = 1
 PF_CONV_L    = 2
+PF_SLOPE_R   = 4    # slopes down-right (+0..+3 px across girder; distinct from PF_CONV bits 1|2!)
+PF_SLOPE_L   = 8    # slopes down-left  (+0..+3 px across girder; distinct from PF_CONV bits 1|2!)
 
 LF_NORMAL    = 0
 LF_BROKEN    = 1
@@ -49,8 +51,9 @@ T_ITEM_UMB   = 18
 
 TRK_STAGE1   = 0    # TRK_BGM_BARRELS
 TRK_STAGE2   = 1    # TRK_BGM_PIEFACTORY
-TRK_STAGE3   = 2    # TRK_BGM_ELEVATORS
+TRK_STAGE3   = 0xFF # Authentic dkong-snd.asm $50A=$00: 75m Elevators has NO BGM (silent shaft + Jack-Spring SFX!)
 TRK_STAGE4   = 3    # TRK_BGM_RIVETS
+TRK_REMIX3   = 2    # TRK_BGM_ELEVATORS (available for Remix stages & Sound Lab!)
 
 
 def encode_level(lv):
@@ -112,12 +115,12 @@ STAGE_25M = {
     'bonus': (0x50, 0x00),
     'plats': [
         (12, 17, 4, PF_NORMAL),
-        (0, 29, 7, PF_NORMAL),
-        (2, 31, 10, PF_NORMAL),
-        (0, 29, 13, PF_NORMAL),
-        (2, 31, 16, PF_NORMAL),
-        (0, 29, 19, PF_NORMAL),
-        (0, 31, 22, PF_NORMAL),
+        (0, 29, 7, PF_SLOPE_R),     # Kong's girder: flat left (0..17), bends down-right (18..29)!
+        (2, 31, 10, PF_SLOPE_L),    # 5th girder: slopes down-left!
+        (0, 29, 13, PF_SLOPE_R),    # 4th girder: slopes down-right!
+        (2, 31, 16, PF_SLOPE_L),    # 3rd girder: slopes down-left!
+        (0, 29, 19, PF_SLOPE_R),    # 2nd girder: slopes down-right!
+        (0, 31, 22, PF_NORMAL),     # Bottom foundation girder (flush under Oil Drum!)
     ],
     'ladders': [
         (9, 2, 7, LF_DECOR),
@@ -402,7 +405,7 @@ STAGE_REMIX_2 = {
 STAGE_REMIX_3 = {
     'ltype': LT_ELEVATORS,
     'gfxbank': 6,
-    'bgm': TRK_STAGE3,
+    'bgm': TRK_REMIX3,
     'height_idx': 2,
     'mario': (2, 22),
     'dk': (3, 7),
@@ -575,7 +578,7 @@ STAGE_REMIX_6 = {
 STAGE_REMIX_7 = {
     'ltype': LT_ELEVATORS,
     'gfxbank': 6,
-    'bgm': TRK_STAGE3,
+    'bgm': TRK_REMIX3,
     'height_idx': 2,
     'mario': (2, 20),
     'dk': (3, 7),
@@ -703,6 +706,8 @@ def emit_asm(path):
         f'PF_NORMAL    equ {PF_NORMAL}',
         f'PF_CONV_R    equ {PF_CONV_R}',
         f'PF_CONV_L    equ {PF_CONV_L}',
+        f'PF_SLOPE_R   equ {PF_SLOPE_R}',
+        f'PF_SLOPE_L   equ {PF_SLOPE_L}',
         f'LF_NORMAL    equ {LF_NORMAL}',
         f'LF_BROKEN    equ {LF_BROKEN}',
         f'LF_DECOR     equ {LF_DECOR}',
@@ -770,13 +775,13 @@ def emit_asm(path):
     lines.append('DEMO_SCRIPT_TABLE:')
     lines.append('    DW DEMO_25M, DEMO_50M, DEMO_75M, DEMO_100M')
     lines.append('DEMO_25M:')
-    lines.append('    DB 85, $08, 2, $18, 86, $08, 28, $01, 48, $04, 2, $14, 90, $04, 28, $01, 70, $08, 0, 0')
+    lines.append('    DB 80, $08, 2, $18, 84, $08, 28, $01, 48, $04, 2, $14, 72, $04, 28, $01, 50, $08, 0, 0')
     lines.append('DEMO_50M:')
     lines.append('    DB 50, $08, 28, $01, 74, $08, 32, $01, 2, $14, 30, $04, 32, $01, 56, $04, 0, 0')
     lines.append('DEMO_75M:')
     lines.append('    DB 34, $01, 8, $08, 42, $01, 2, $18, 26, $08, 36, $00, 2, $18, 24, $08, 0, 0')
     lines.append('DEMO_100M:')
-    lines.append('    DB 12, $04, 28, $01, 60, $08, 2, $18, 52, $08, 34, $01, 55, $04, 2, $14, 48, $04, 0, 0')
+    lines.append('    DB 8, $04, 26, $01, 24, $08, 2, $18, 36, $08, 34, $01, 2, $14, 48, $04, 30, $08, 0, 0')
     lines.append('')
 
     for name, lv in STAGES:

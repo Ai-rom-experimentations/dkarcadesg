@@ -9,13 +9,14 @@ A ground-up Z80 assembly port of **Donkey Kong** for the **Sega SG-1000** target
 | Subsystem | Details |
 | --- | --- |
 | **Target Hardware** | Sega SG-1000 (3.58 MHz Z80A, **1 KB Work RAM** `$C000–$C3FF`, TMS9918ANL 16 KB VRAM, SN76489AN PSG, `$DC/$DD` joypad, `$0066` NMI Pause) |
-| **ROM Footprint** | **49,152 bytes (`48.00 KB`)** raw headerless `.sg` image (`$0000–$A74F` = **42.8 KB** active code, graphics, stages & audio; `$BFC0–$BFFF` cartridge signature; no SMS `"TMR SEGA"` header at `$7FF0`) |
-| **12 Playable Stages** | **4 Authentic Original Arcade Stages** (`25m Barrels` `$3AE4`, `50m Pie Factory` `$3B5D` with telescoping top ladders + dual split conveyors feeding the central Oil Vat + `XXX` furnace, `75m Elevators` `$3BE5` with rising/descending cable elevators + full 21-girder stepping-stone network + bouncing Jack-Springs + lethal bottom girder, `100m Rivets` `$3C8B`) + **8 Remix Tour Stages** (`Crossover`, `Spiral`, `The Pits`, `Rampy`, `DK'94 Span`, `Factory Overdrive`, `Skyscraper Shafts`, `Rivet Citadel`) |
-| **8 Stage Tile Banks** | Dedicated TMS9918A Mode-2 (`Graphics II`, `2` colors per `8×1` row) pattern + color banks (`STAGE0..STAGE7`) giving each Classic & Remix stage its own palette and girder style |
+| **ROM Footprint** | **49,152 bytes (`48.00 KB`)** raw headerless `.sg` image (`$0000–$AF48` = **44.9 KB** active code, graphics, stages & audio; `$BFC0–$BFFF` cartridge signature; no SMS `"TMR SEGA"` header at `$7FF0`) |
+| **12 Playable Stages** | **4 Authentic Original Arcade Stages** (`25m Barrels` `$3AE4` with sub-pixel sloped girders `T_SLOPE_0..3` & wild vertical 1st barrel oil-drum ignition, `50m Pie Factory` `$3B5D` with telescoping top ladders + dual split conveyors feeding the central Oil Vat + `XXX` furnace, `75m Elevators` `$3BE5` with silent shaft per `dkong-snd.asm:$50A=$00` + rising/descending cable elevators + 21-girder stepping-stone network + bouncing Jack-Springs + top-pulley crush & lethal bottom girder, `100m Rivets` `$3C8B` with circle-perforated royal-blue girders & walk/jump rivet pulls) + **8 Remix Tour Stages** |
+| **8 Stage Tile Banks + Framed `[BONUS]` HUD** | Dedicated TMS9918A Mode-2 (`Graphics II`, `2` colors per `8×1` row) pattern + color banks (`STAGE0..STAGE7`) with authentic 1981 arcade palettes (`25m` magenta/crimson girders + white/cyan ladders, `50m` golden-ochre/red girders + warm conveyors + cyan ladders, `75m` red/salmon girders + yellow ladders + cyan cables, `100m` royal-blue circle girders + yellow rivets), red `1UP`/`HIGH` headers, and framed cyan `[BONUS]` scoreboard box |
 | **8 Full-Screen 3-Bank Mode-2 Screens** | Custom multi-bank (`R3=$FF, R4=$03`, up to 558 unique colored tiles per screen) pixel-art screens: **Title**, **How High Can You Get?**, **Stage-Clear Broken Heart**, **100m Victory Finale**, **Cast & Item Showcase**, **Hall of Fame**, **Game Over**, and **Sound + Stage Lab** |
-| **132-Pattern Layered Sprite Atlas** | Layered multi-color sprites (3-color Mario with red cap, tan face overlay & blue overalls; 2-color Donkey Kong with chestnut fur & tan face/grin overlay; 2-color Pauline with golden hair & pink gown), 4-frame rotating death animation, hammer swing overlays, floating score popups (`100`/`300`/`500`/`800`/`1UP`), `"HELP!"` bubble, and coprime (`+5 mod 12`) scanline flicker rotation |
-| **Arcade Opening & Intermission Cutscenes** | Full arcade **Opening Cutscene** (Kong climbs twin center ladders carrying Pauline, ripping out rungs behind him, then leaps across stomping 4 times to warp the girders), `"HOW HIGH CAN YOU GET ?"` height tower, **Broken-Heart Escape**, and **100m Tower Collapse + Finale** |
-| **SN76489AN 4-Channel Audio** | Pitch-accurate periods (`64..974`) converted directly from `dkong-snd.asm` (`i8035` `$600` pitch table & `$300–$532` pattern playlists): **15 multi-voice music tracks** + **16 swept/noise SFX** |
+| **163-Pattern Layered Sprite Atlas & `24×24` Boss Kong** | Flicker-free **`24×24` Multi-Color Donkey Kong** (`3×3` `8×8` chestnut fur grid + tan face & muscular chest overlays = `<= 4` sprites/scanline, plus golden-amber held barrel in pose 3), 3-color Mario (red cap/shirt, tan face overlay, blue overalls), 2-color Pauline with 50% duty-cycle `"HELP!"` callout, 4-frame rotating death animation, hammer swing overlays, floating score popups (`100`/`300`/`500`/`800`/`1UP`), and coprime (`+5 mod 12`) scanline flicker rotation |
+| **Arcade Opening & Intermission Cutscenes** | Full arcade **Opening Cutscene** (`24×24` Kong climbs twin center ladders carrying Pauline, ripping out rungs behind him, then hops 4 times progressively bending each girder tier from flat into crooked `T_SLOPE_0..3` before his 3-part Gorilla Roar), `"HOW HIGH CAN YOU GET ?"` height tower, **Heart -> Shattered Broken-Heart + Kong Climb-Off Escape**, and **100m Tower Collapse + Odd/Even Victory Finale** |
+| **SN76489AN 4-Channel `i8035` Audio** | Pitch-accurate periods (`64..974`) & register math derived directly from `dkong-snd.asm`: **15 multi-voice music tracks** with `ENV_PLUCK` (`$54C-$57B` 5-frame plucked bass gate + `$13F` upward pitch scoop) & `ENV_DECAY` (`$15E-$17F` RC decay + warm vibrato) + **16 `i8035`-simulated SFX** including Tone-2-clocked Periodic Noise (`$03`, `f_tone2/16`) 3-part Gorilla Roar, `$009-$03A -> TRK_MUS_DEATH_TAIL` Death sweep, Smash (`$0C6-$0EE`), Spring (`$0A8-$0C4`), Fall/Drop (`$5BA-$5E3`), and `Pattern $08` Score arpeggio |
+| **Arcade Physics & Enemy AI** | Committed airborne horizontal velocity (`P_VX`, no mid-air reversal), lethal `>= 18 px` fall-height death, sub-pixel `0..+3 px` sloped girder tracking for Mario/Barrels/Fireballs, Mario-position-aware Blue/Brown Barrel ladder pursuit, horizontal `P_X` + vertical ladder pursuit & conveyor drift on Fireballs, and trailing-heel walk/jump Rivet pulls |
 | **4 Game Modes + Attract Cycle** | **1P Arcade 4-Stage** (default — plays all 4 original stages `25m → 50m Pie Factory → 75m Elevators → 100m Rivets` right from `L=01`), **1P US Tournament** (authentic `$3A65` `2→3→4→5` stage progression), **1P Remix 8-Tour** (all 8 Remix stages), **Sound + Stage Lab** (interactive jukebox & stage warp), plus 4-page **Attract Mode** cycling live gameplay demos across all 4 stage types |
 
 ---
@@ -45,7 +46,7 @@ make          # Assemble 48 KB cartridge -> sg1000/dkong.sg (49,152 bytes)
 To run automated headless verification using the bundled Z80 + TMS9918A + SN76489 emulator (`tools/emu.py`):
 
 ```bash
-python3 tools/emu.py dkong.sg --frames 300 --screenshot title.png
+python3 tools/emu.py dkong.sg --frames 300 --shot title.png
 ```
 
 ---
@@ -71,4 +72,4 @@ python3 tools/emu.py dkong.sg --frames 300 --screenshot title.png
 - `$1800–$1AFF`: Name Table (`32×24`)
 - `$1F80–$1FFF`: Sprite Attribute Table (`32×4` bytes)
 - `$2000–$37FF`: Color Table (`2` colors per `8×1` pixel row)
-- `$3800–$3FFF`: Sprite Pattern Generator (`132` `8×8` patterns)
+- `$3800–$3FFF`: Sprite Pattern Generator (`163` `8×8` patterns)
