@@ -45,11 +45,11 @@ ENEMIES         equ $C138       ;  96B ($C138-$C197): 12 slots * 8B
 ELEV            equ $C198       ;  24B ($C198-$C1AF): 4 cars * 6B
 ITEMS_TAKEN     equ $C1B0       ;   8B ($C1B0-$C1B7)
 RIVETS_PULLED   equ $C1B8       ;   8B ($C1B8-$C1BF)
-LEVELBUF        equ $C1C0       ; 200B ($C1C0-$C287): L_SIZE=195
-HISCORES        equ $C288       ;  30B ($C288-$C2A5): 5 entries * 6B
-NAMEENTRY       equ $C2A6       ;  10B ($C2A6-$C2AF)
-MUSIC           equ $C2B0       ;  24B ($C2B0-$C2C7)
-SCRATCH         equ $C2C8       ;  64B ($C2C8-$C307)
+LEVELBUF        equ $C1C0       ; 216B ($C1C0-$C297): L_SIZE=210
+HISCORES        equ $C298       ;  30B ($C298-$C2B5): 5 entries * 6B
+NAMEENTRY       equ $C2B6       ;  10B ($C2B6-$C2BF)
+MUSIC           equ $C2C0       ;  24B ($C2C0-$C2D7)
+SCRATCH         equ $C2D8       ;  64B ($C2D8-$C317)
 RAM_CLEAR_END   equ $C3A0
 STACK_TOP       equ $C400
 
@@ -66,6 +66,7 @@ P_LAD_TOP       equ 8
 P_LAD_BOT       equ 9
 P_STEP_T        equ 10
 P_JUMP_CNT      equ 11
+P_LAD_FLAGS     equ 12
 
 PS_STAND        equ 0
 PS_RUN          equ 1
@@ -129,6 +130,8 @@ G_DEMO_IDX      equ 42
 G_JB_CUR        equ 43
 G_JB_TRK        equ 44
 G_JB_SFX        equ 45
+G_TELE_EXT      equ 46          ; 1=telescoping ladders extended, 0=retracted
+G_TELE_T        equ 47          ; telescoping ladder timer
 
 ; Game states
 GS_TITLE        equ 0

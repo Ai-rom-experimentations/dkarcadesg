@@ -1079,12 +1079,12 @@ jbu_b1_launch:
         LD (GAME + G_PAUSE), A
         LD A, 3
         LD (GAME + G_LIVES), A
-        ; Set mode=2 if stage>=4 else mode=1 so subsequent progression continues!
+        ; Set mode=2 if stage>=4 else mode=0 (4-stage original arcade) so progression continues!
         LD A, (GAME + G_STAGE_ID)
         CP 4
         JR NC, jbu_go_rmx
         LD (GAME + G_STAGE_SEQ), A
-        LD A, 1
+        XOR A
         LD (GAME + G_MODE), A
         JP HowHighScreen
 jbu_go_rmx:
@@ -1138,10 +1138,14 @@ StartAttractDemo:
 ResolveCurrentStage:
         LD A, (GAME + G_MODE)
         CP 1
-        JR Z, rcs_jp
+        JR Z, rcs_us
         CP 2
         JR Z, rcs_remix
-        ; Mode 0: Authentic US Arcade 2->3->4->5 stage progression ($3A65)
+        ; Mode 0 (Default!): Complete 4-Stage Original Arcade (25m -> 50m Pie Factory -> 75m Elevators -> 100m Rivets)
+        LD HL, PROG_ORIG
+        JR rcs_lookup
+rcs_us:
+        ; Mode 1: US Set-1 Tournament 2->3->4->5 stage progression ($3A65)
         LD A, (GAME + G_LOOP)
         CP 4
         JR C, rcs_us_ok
@@ -1156,9 +1160,6 @@ rcs_us_ok:
         INC HL
         LD D, (HL)
         EX DE, HL
-        JR rcs_lookup
-rcs_jp:
-        LD HL, PROG_JP
         JR rcs_lookup
 rcs_remix:
         LD HL, PROG_REMIX
@@ -1186,7 +1187,19 @@ HowHighScreen:
         CALL LoadArtScreen
         CALL DrawHUD
 
-        ; Peek height_idx from selected stage record
+        ; In Mode 1 (US Tournament), height matches sequence index (0..3 -> 25m..100m per $3CF0);
+        ; in Mode 0 (Original 4-Stage) & Remix, use stage record's L_HEIGHT_IDX!
+        LD A, (GAME + G_MODE)
+        CP 1
+        JR NZ, hhs_from_rec
+        LD A, (GAME + G_STAGE_SEQ)
+        CP 4
+        JR C, hhs_set_c
+        LD A, 3
+hhs_set_c:
+        LD C, A
+        JR hhs_draw_tiers
+hhs_from_rec:
         LD A, (GAME + G_STAGE_ID)
         ADD A, A
         LD L, A
@@ -1199,6 +1212,7 @@ HowHighScreen:
         PUSH DE
         POP IX
         LD C, (IX + L_HEIGHT_IDX)   ; 0..3 (25m..100m)
+hhs_draw_tiers:
 
         ; Draw height labels up to C+1 tiers
         LD HL, VRAM_NAME + (18 * NAME_COLS) + 2
@@ -1388,8 +1402,11 @@ lsb_sp_ok:
         LD (GAME + G_FIRE_CNT), A
         LD (GAME + G_POP_T), A
         LD (GAME + G_PAUSE), A
+        LD A, 1
+        LD (GAME + G_TELE_EXT), A
         LD A, 180
         LD (GAME + G_CONV_T), A
+        LD (GAME + G_TELE_T), A
 
         ; Oil starts unlit on 25m until first barrel hits, lit immediately on 50m!
         LD A, (GAME + G_LEVELTYPE)
@@ -1551,25 +1568,25 @@ bsm_oil:
         LD A, T_OILCAN + 3
         CALL TilePut
 
-        ; On 50m, draw the iconic central XXX truss pedestal underneath!
+        ; On 50m Pie Factory, draw the central XXX furnace truss flanking the Oil Vat!
         LD A, (GAME + G_LEVELTYPE)
         CP LT_PIES
         JR NZ, bsm_stack
         LD A, (LEVELBUF + L_OILY)
-        ADD A, 3
-        LD C, A
+        DEC A
+        LD C, A                 ; rows L_OILY-1 .. L_OILY+1 (12..14)
         LD D, 3
 bsm_truss:
         LD A, (LEVELBUF + L_OILX)
         DEC A
-        LD B, A
-        LD E, 4
-bsm_tx:
+        LD B, A                 ; left XXX col (14)
         LD A, T_TRUSS_X
         CALL TilePut
-        INC B
-        DEC E
-        JR NZ, bsm_tx
+        LD A, (LEVELBUF + L_OILX)
+        ADD A, 2
+        LD B, A                 ; right XXX col (17)
+        LD A, T_TRUSS_X
+        CALL TilePut
         INC C
         DEC D
         JR NZ, bsm_truss
@@ -1846,6 +1863,26 @@ ast_f1:
         CALL TilePut
 
 ast_conv:
+        ; Update telescoping top ladders on 50m Pie Factory (LF_TELESCOPE)
+        LD A, (GAME + G_LEVELTYPE)
+        CP LT_PIES
+        JR NZ, ast_conv_chk
+        LD A, (GAME + G_TELE_T)
+        DEC A
+        LD (GAME + G_TELE_T), A
+        JR NZ, ast_conv_chk
+        LD A, (GAME + G_TELE_EXT)
+        XOR 1
+        LD (GAME + G_TELE_EXT), A
+        LD B, 180               ; extended for 3.0s
+        JR NZ, ast_tset
+        LD B, 90                ; retracted for 1.5s
+ast_tset:
+        LD A, B
+        LD (GAME + G_TELE_T), A
+        CALL RedrawTelescopeLadders
+
+ast_conv_chk:
         ; Animate conveyor rollers every 8 frames on conveyor stages
         LD A, (GAME + G_FRAME)
         AND 7
@@ -1883,11 +1920,43 @@ ast_pnxt:
         DJNZ ast_plp
         RET
 
+RedrawTelescopeLadders:
+        LD A, (LEVELBUF + L_NLADDER)
+        OR A
+        RET Z
+        LD B, A
+        LD IX, LEVELBUF + L_LADDERS
+rtl_lp:
+        PUSH BC
+        LD A, (IX + 3)
+        CP LF_TELESCOPE
+        JR NZ, rtl_nxt
+        LD B, (IX + 0)          ; ladder col
+        LD C, (IX + 1)
+        INC C                   ; rtop + 1 (row 8)
+        LD A, (GAME + G_TELE_EXT)
+        OR A
+        LD D, T_LADDER
+        JR NZ, rtl_put
+        LD D, T_BLANK
+rtl_put:
+        LD A, D
+        CALL TilePut
+        INC C                   ; rtop + 2 (row 9)
+        LD A, D
+        CALL TilePut
+rtl_nxt:
+        LD DE, 4
+        ADD IX, DE
+        POP BC
+        DJNZ rtl_lp
+        RET
+
 ; ============================================================================
 ;  Elevators (4 Wrapping Cars on Dual Cable Shafts - Stage 3 & Remix 3)
 ; ============================================================================
 InitElevators:
-        ; Draw static cable columns + top/bottom pulleys
+        ; Draw static cable columns + top/bottom pulleys (between row 8 & row 22)
         LD A, (LEVELBUF + L_ELEVC0)
         CP $FF
         RET Z
@@ -1901,38 +1970,38 @@ InitElevators:
         LD IX, ELEV
         LD A, (LEVELBUF + L_ELEVC0)
         LD (IX + EL_COL), A
-        LD (IX + EL_ROW), 19
+        LD (IX + EL_ROW), 20
         LD (IX + EL_DY), -1
-        LD (IX + EL_MIN), 8
-        LD (IX + EL_MAX), 20
+        LD (IX + EL_MIN), 9
+        LD (IX + EL_MAX), 21
         LD (IX + EL_TIMER), 14
 
         LD DE, EL_SIZE
         ADD IX, DE
         LD A, (LEVELBUF + L_ELEVC0)
         LD (IX + EL_COL), A
-        LD (IX + EL_ROW), 13
+        LD (IX + EL_ROW), 14
         LD (IX + EL_DY), -1
-        LD (IX + EL_MIN), 8
-        LD (IX + EL_MAX), 20
+        LD (IX + EL_MIN), 9
+        LD (IX + EL_MAX), 21
         LD (IX + EL_TIMER), 14
 
         ADD IX, DE
         LD A, (LEVELBUF + L_ELEVC1)
         LD (IX + EL_COL), A
-        LD (IX + EL_ROW), 9
+        LD (IX + EL_ROW), 10
         LD (IX + EL_DY), 1
-        LD (IX + EL_MIN), 8
-        LD (IX + EL_MAX), 20
+        LD (IX + EL_MIN), 9
+        LD (IX + EL_MAX), 21
         LD (IX + EL_TIMER), 14
 
         ADD IX, DE
         LD A, (LEVELBUF + L_ELEVC1)
         LD (IX + EL_COL), A
-        LD (IX + EL_ROW), 15
+        LD (IX + EL_ROW), 16
         LD (IX + EL_DY), 1
-        LD (IX + EL_MIN), 8
-        LD (IX + EL_MAX), 20
+        LD (IX + EL_MIN), 9
+        LD (IX + EL_MAX), 21
         LD (IX + EL_TIMER), 14
 
         ; Stamp initial elevator cars
@@ -1947,12 +2016,12 @@ ie_draw:
         DJNZ ie_draw
         RET
 
-; B = shaft col
+; B = shaft col (runs below Kong's row 7 girder down to row 22 above lethal row 23)
 DrawCableShaft:
-        LD C, 6
+        LD C, 8
         LD A, T_PULLEY_TOP
         CALL TilePut
-        LD C, 7
+        LD C, 9
 dcs_lp:
         LD A, T_CABLE
         CALL TilePut
@@ -2223,17 +2292,11 @@ pl_ypos_ok:
         LD A, L
         LD (PLAYER + P_Y), A
 
-        ; ---- 5. Ground landing (only when P_VY >= 0!) ----
+        ; ---- 5. Ground landing (only when P_VY >= 0; checks center + toe/heel!) ----
         LD A, (PLAYER + P_VY)
         BIT 7, A
         JR NZ, pl_airborne
 
-        LD A, (PLAYER + P_X)
-        ADD A, 8
-        SRL A
-        SRL A
-        SRL A
-        LD B, A                 ; center column
         LD A, (PLAYER + P_Y)
         ADD A, 16
         LD E, A                 ; feet Y in pixels
@@ -2241,9 +2304,38 @@ pl_ypos_ok:
         SRL A
         SRL A
         LD C, A                 ; feet tile row
+
+        LD A, (PLAYER + P_X)
+        ADD A, 8
+        SRL A
+        SRL A
+        SRL A
+        LD B, A                 ; center column
+        CALL SolidAt
+        OR A
+        JR NZ, pl_chk_snap
+
+        LD A, (PLAYER + P_X)
+        ADD A, 5
+        SRL A
+        SRL A
+        SRL A
+        LD B, A                 ; left foot column
+        CALL SolidAt
+        OR A
+        JR NZ, pl_chk_snap
+
+        LD A, (PLAYER + P_X)
+        ADD A, 10
+        SRL A
+        SRL A
+        SRL A
+        LD B, A                 ; right foot column
         CALL SolidAt
         OR A
         JR Z, pl_airborne
+
+pl_chk_snap:
         ; Snap only if feet are within top 6 pixels of this solid row!
         LD A, C
         ADD A, A
@@ -2300,12 +2392,20 @@ pl_idle:
         LD (PLAYER + P_STATE), A
 
 pl_chk_pit:
+        ; On 75m Elevators, falling onto the bottom row-23 girder is lethal (dkong.asm $3C85)!
+        LD A, (GAME + G_LEVELTYPE)
+        CP LT_ELEVATORS
+        JR NZ, pl_pit_std
+        LD A, (PLAYER + P_Y)
+        CP 23 * 8 - 16
+        JP NC, KillPlayer
+pl_pit_std:
         LD A, (PLAYER + P_Y)
         CP 178
         RET C
         JP KillPlayer
 
-; Check all normal ladders for column proximity & directional Y range
+; Check normal & telescoping ladders for column proximity & directional Y range
 TryGrabLadder:
         LD A, (LEVELBUF + L_NLADDER)
         OR A
@@ -2316,8 +2416,11 @@ tgl_loop:
         PUSH BC
         LD A, (IX + 3)
         CP LF_NORMAL
-        JR NZ, tgl_next
+        JR Z, tgl_col
+        CP LF_TELESCOPE
+        JP NZ, tgl_next
 
+tgl_col:
         ; Horizontal check: |(P_X + 8) - (lad_col*8 + 4)| <= 5
         LD A, (IX + 0)
         ADD A, A
@@ -2330,15 +2433,31 @@ tgl_loop:
         SUB C
         CALL Abs
         CP 6
-        JR NC, tgl_next
+        JP NC, tgl_next
 
         ; Compute top_py = rtop*8 - 16, bot_py = rbot*8 - 16
         LD A, (IX + 1)
+        LD C, A
+        LD A, (IX + 3)
+        CP LF_TELESCOPE
+        JR NZ, tgl_top_ok
+        LD A, (GAME + G_TELE_EXT)
+        OR A
+        JR NZ, tgl_top_ok
+        ; Retracted: cannot climb DOWN from top conveyor, and Up stops 2 rows lower!
+        LD A, (INP_HELD)
+        BIT 0, A
+        JR Z, tgl_next
+        LD A, C
+        ADD A, 2
+        LD C, A
+tgl_top_ok:
+        LD A, C
         ADD A, A
         ADD A, A
         ADD A, A
         SUB 16
-        LD D, A                 ; D = top_py
+        LD D, A                 ; D = effective top_py
         LD A, (IX + 2)
         ADD A, A
         ADD A, A
@@ -2387,6 +2506,8 @@ tgl_grab:
         LD (PLAYER + P_LAD_TOP), A
         LD A, (IX + 2)
         LD (PLAYER + P_LAD_BOT), A
+        LD A, (IX + 3)
+        LD (PLAYER + P_LAD_FLAGS), A
         XOR A
         LD (PLAYER + P_VY), A
         LD (PLAYER + P_YSUB), A
@@ -2414,6 +2535,25 @@ pl_climb_update:
         LD A, (INP_HELD)
         BIT 0, A
         JR Z, pcu_dn
+        ; On retracted telescoping ladder, stop upward climb at rtop+2 stub without dismounting!
+        LD A, (PLAYER + P_LAD_FLAGS)
+        CP LF_TELESCOPE
+        JR NZ, pcu_go_up
+        LD A, (GAME + G_TELE_EXT)
+        OR A
+        JR NZ, pcu_go_up
+        LD A, (PLAYER + P_LAD_TOP)
+        ADD A, 2
+        ADD A, A
+        ADD A, A
+        ADD A, A
+        SUB 16
+        LD B, A                 ; stub top_py (56)
+        LD A, (PLAYER + P_Y)
+        CP B
+        JR Z, pcu_bounds        ; hold on stub until ladder extends!
+        JR C, pcu_go_up         ; already above stub -> finish climbing!
+pcu_go_up:
         LD A, (PLAYER + P_Y)
         DEC A
         LD (PLAYER + P_Y), A
@@ -2691,6 +2831,7 @@ SpawnStagePie:
         ADD A, A
         LD B, A
         LD A, (LEVELBUF + L_OILY)
+        INC A
         ADD A, A
         ADD A, A
         ADD A, A
@@ -2704,7 +2845,7 @@ ssp_pie:
         LD (IX + E_TYPE), ET_PIE
         LD (IX + E_VY), 0
         LD (IX + E_ANIM), 0
-        ; Alternate spawning on row 11 (80px) & row 18 (136px), left or right edge
+        ; Alternate spawning on upper split conveyors (row 11) & lower conveyor (row 19)!
         LD A, (GAME + G_RNG)
         BIT 1, A
         JR Z, ssp_row18
@@ -2719,7 +2860,7 @@ ssp_left:
         LD (IX + E_VX), 1
         RET
 ssp_row18:
-        LD (IX + E_Y), 18 * 8 - 8
+        LD (IX + E_Y), 19 * 8 - 8
         BIT 2, A
         JR Z, ssp_l18
         LD (IX + E_X), 29 * 8
@@ -3248,8 +3389,12 @@ esp_drop:
         LD (IX + E_STATE), 0
         RET
 
-; ---- Cement Pie on Conveyor (50m) ----
+; ---- Cement Pie on Conveyor (50m Pie Factory) ----
 EnemyPie:
+        LD A, (IX + E_STATE)
+        CP 2
+        JR Z, epi_fall
+
         LD A, (GAME + G_FRAME)
         AND 1
         RET NZ
@@ -3266,7 +3411,9 @@ EnemyPie:
         SRL A
         SRL A
         LD E, A
+        PUSH IX
         CALL ConveyorDirAtDE
+        POP IX
         OR A
         JR Z, epi_use_vx
         LD (IX + E_VX), A
@@ -3278,30 +3425,31 @@ epi_use_vx:
         JR C, epi_kill
         CP 244
         JR NC, epi_kill
-        ; Check if sliding into central Oil Firepit on row 11!
-        LD A, (LEVELBUF + L_OILX)
-        CP $FF
-        RET Z
-        ADD A, A
-        ADD A, A
-        ADD A, A
-        ADD A, 4
-        LD B, A
+        ; Did pie roll off the inner end of a split conveyor into the Oil Vat gap?
         LD A, (IX + E_X)
-        SUB B
-        CALL Abs
-        CP 9
-        RET NC
-        LD A, (LEVELBUF + L_OILY)
-        ADD A, 2
-        ADD A, A
-        ADD A, A
-        ADD A, A
+        ADD A, 4
+        SRL A
+        SRL A
+        SRL A
         LD B, A
         LD A, (IX + E_Y)
         ADD A, 8
-        CP B
+        SRL A
+        SRL A
+        SRL A
+        LD C, A
+        CALL SolidAt
+        OR A
         RET NZ
+        LD (IX + E_STATE), 2    ; tip off conveyor & drop into Oil Vat!
+        RET
+
+epi_fall:
+        LD A, (IX + E_Y)
+        ADD A, 2
+        LD (IX + E_Y), A
+        CP 104                  ; plunged into Oil Vat flames -> burn up!
+        RET C
 epi_kill:
         LD (IX + E_STATE), 0
         RET
@@ -4642,8 +4790,8 @@ bs_dma:
 ; ============================================================================
 txt_hud1:       DB "1UP 000000     HIGH 000000", $FF
 txt_hud2:       DB "     L=01      BONUS 0000", $FF
-txt_mode0:      DB "1P US ARCADE", $FF
-txt_mode1:      DB "1P JP ARCADE", $FF
+txt_mode0:      DB "1P ARCADE 4-STAGE", $FF
+txt_mode1:      DB "1P US TOURNAMENT", $FF
 txt_mode2:      DB "1P REMIX 8-TOUR", $FF
 txt_mode3:      DB "SOUND + STAGE LAB", $FF
 txt_press:      DB "PRESS BUTTON 1", $FF
@@ -4680,8 +4828,8 @@ txt_jb_go:      DB "LAUNCH SELECTED STAGE!", $FF
 jb_stage_names:
         DW jbs_0, jbs_1, jbs_2, jbs_3, jbs_4, jbs_5
         DW jbs_6, jbs_7, jbs_8, jbs_9, jbs_10, jbs_11
-jbs_0:  DB "01 25M GIRDERS   ", $FF
-jbs_1:  DB "02 50M CONVEYORS ", $FF
+jbs_0:  DB "01 25M BARRELS   ", $FF
+jbs_1:  DB "02 50M PIE FACTRY", $FF
 jbs_2:  DB "03 75M ELEVATORS ", $FF
 jbs_3:  DB "04 100M RIVETS   ", $FF
 jbs_4:  DB "05 RMX CROSSOVER ", $FF

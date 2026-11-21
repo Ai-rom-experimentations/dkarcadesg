@@ -9,14 +9,14 @@ A ground-up Z80 assembly port of **Donkey Kong** for the **Sega SG-1000** target
 | Subsystem | Details |
 | --- | --- |
 | **Target Hardware** | Sega SG-1000 (3.58 MHz Z80A, **1 KB Work RAM** `$C000–$C3FF`, TMS9918ANL 16 KB VRAM, SN76489AN PSG, `$DC/$DD` joypad, `$0066` NMI Pause) |
-| **ROM Footprint** | **49,152 bytes (`48.00 KB`)** raw headerless `.sg` image (`$0000–$A4E8` = **42.2 KB** active code, graphics, stages & audio; `$BFC0–$BFFF` cartridge signature; no SMS `"TMR SEGA"` header at `$7FF0`) |
-| **12 Playable Stages** | **4 Classic Arcade Stages** (`25m Girders`, `50m Pie Factory`, `75m Elevators`, `100m Rivets`) + **8 Remix Tour Stages** (`Crossover`, `Spiral`, `The Pits`, `Rampy`, `DK'94 Span`, `Factory Overdrive`, `Skyscraper Shafts`, `Rivet Citadel`) inspired by `hacking/level examples/*.tmx` |
+| **ROM Footprint** | **49,152 bytes (`48.00 KB`)** raw headerless `.sg` image (`$0000–$A74F` = **42.8 KB** active code, graphics, stages & audio; `$BFC0–$BFFF` cartridge signature; no SMS `"TMR SEGA"` header at `$7FF0`) |
+| **12 Playable Stages** | **4 Authentic Original Arcade Stages** (`25m Barrels` `$3AE4`, `50m Pie Factory` `$3B5D` with telescoping top ladders + dual split conveyors feeding the central Oil Vat + `XXX` furnace, `75m Elevators` `$3BE5` with rising/descending cable elevators + full 21-girder stepping-stone network + bouncing Jack-Springs + lethal bottom girder, `100m Rivets` `$3C8B`) + **8 Remix Tour Stages** (`Crossover`, `Spiral`, `The Pits`, `Rampy`, `DK'94 Span`, `Factory Overdrive`, `Skyscraper Shafts`, `Rivet Citadel`) |
 | **8 Stage Tile Banks** | Dedicated TMS9918A Mode-2 (`Graphics II`, `2` colors per `8×1` row) pattern + color banks (`STAGE0..STAGE7`) giving each Classic & Remix stage its own palette and girder style |
 | **8 Full-Screen 3-Bank Mode-2 Screens** | Custom multi-bank (`R3=$FF, R4=$03`, up to 558 unique colored tiles per screen) pixel-art screens: **Title**, **How High Can You Get?**, **Stage-Clear Broken Heart**, **100m Victory Finale**, **Cast & Item Showcase**, **Hall of Fame**, **Game Over**, and **Sound + Stage Lab** |
 | **132-Pattern Layered Sprite Atlas** | Layered multi-color sprites (3-color Mario with red cap, tan face overlay & blue overalls; 2-color Donkey Kong with chestnut fur & tan face/grin overlay; 2-color Pauline with golden hair & pink gown), 4-frame rotating death animation, hammer swing overlays, floating score popups (`100`/`300`/`500`/`800`/`1UP`), `"HELP!"` bubble, and coprime (`+5 mod 12`) scanline flicker rotation |
 | **Arcade Opening & Intermission Cutscenes** | Full arcade **Opening Cutscene** (Kong climbs twin center ladders carrying Pauline, ripping out rungs behind him, then leaps across stomping 4 times to warp the girders), `"HOW HIGH CAN YOU GET ?"` height tower, **Broken-Heart Escape**, and **100m Tower Collapse + Finale** |
 | **SN76489AN 4-Channel Audio** | Pitch-accurate periods (`64..974`) converted directly from `dkong-snd.asm` (`i8035` `$600` pitch table & `$300–$532` pattern playlists): **15 multi-voice music tracks** + **16 swept/noise SFX** |
-| **4 Game Modes + Attract Cycle** | **1P US Arcade** (authentic `$3A65` `2→3→4→5` stage progression), **1P JP Arcade** (`25m→50m→75m→100m`), **1P Remix 8-Tour** (all 8 Remix stages), **Sound + Stage Lab** (interactive jukebox & stage warp), plus 4-page **Attract Mode** cycling live gameplay demos across all 4 stage types |
+| **4 Game Modes + Attract Cycle** | **1P Arcade 4-Stage** (default — plays all 4 original stages `25m → 50m Pie Factory → 75m Elevators → 100m Rivets` right from `L=01`), **1P US Tournament** (authentic `$3A65` `2→3→4→5` stage progression), **1P Remix 8-Tour** (all 8 Remix stages), **Sound + Stage Lab** (interactive jukebox & stage warp), plus 4-page **Attract Mode** cycling live gameplay demos across all 4 stage types |
 
 ---
 
@@ -61,10 +61,10 @@ python3 tools/emu.py dkong.sg --frames 300 --screenshot title.png
 - `$C138–$C197` (`96 B`): `ENEMIES` — 12 active obstacle slots (`8 B` each: barrels, blue barrels, fireballs, springs, cement pies)
 - `$C198–$C1AF` (`24 B`): `ELEV` — 4 wrapping elevator cars (`6 B` each)
 - `$C1B0–$C1BF` (`16 B`): `ITEMS_TAKEN` + `RIVETS_PULLED`
-- `$C1C0–$C287` (`200 B`): `LEVELBUF` — active stage descriptor (`182 B`)
-- `$C288–$C2AF` (`40 B`): `HISCORES` (Top-5 BCD scores + 3 initials) & `NAMEENTRY`
-- `$C2B0–$C307` (`88 B`): `MUSIC` (2-voice SN76489 sequencer + SFX driver) & `SCRATCH`
-- `$C308–$C3FF` (`248 B`): Hardware Z80 stack (`SP = $C400`)
+- `$C1C0–$C297` (`216 B`): `LEVELBUF` — active stage descriptor (`210 B`)
+- `$C298–$C2BF` (`40 B`): `HISCORES` (Top-5 BCD scores + 3 initials) & `NAMEENTRY`
+- `$C2C0–$C317` (`88 B`): `MUSIC` (2-voice SN76489 sequencer + SFX driver) & `SCRATCH`
+- `$C318–$C3FF` (`232 B`): Hardware Z80 stack (`SP = $C400`)
 
 ### 16 KB TMS9918A VRAM (Zero-Overlap Mode 2)
 - `$0000–$17FF`: Pattern Generator Table (single-bank during stages; all 3 banks on full-screen artwork)
